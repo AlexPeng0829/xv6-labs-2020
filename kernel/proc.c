@@ -292,7 +292,7 @@ fork(void)
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
-
+  np->syscall_mask = p->syscall_mask;
   np->state = RUNNABLE;
 
   release(&np->lock);
@@ -692,4 +692,19 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+uint64
+get_free_proc(void)
+{
+  uint64 num = 0;
+  struct proc *p;
+  for(p = proc; p < &proc[NPROC]; p++)
+  {
+    if(p->state != UNUSED)
+    {
+      num++;
+    }
+  }
+  return num;
 }
