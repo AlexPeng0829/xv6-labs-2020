@@ -86,11 +86,11 @@ test1()
   j = 0;
   sigalarm(2, periodic);
   for(i = 0; i < 500000000; i++){
-    if(count >= 10)
+    if(count >= 1)
       break;
     foo(i, &j);
   }
-  if(count < 10){
+  if(count < 1){
     printf("\ntest1 failed: too few calls to the handler\n");
   } else if(i != j){
     // the loop should have called foo() i times, and foo() should

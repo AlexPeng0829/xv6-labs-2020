@@ -77,8 +77,19 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2){
+    // check if sigalarm has register a timer count-down
+    if(p->ticks_total > 0){
+      memmove(p->sigalarm_frame, p->trapframe, sizeof(struct trapframe));
+      p->ticks_elapse++;
+      if(p->ticks_elapse == p->ticks_total){
+        p->ticks_elapse = 0;
+        p->ticks_total = 0;
+        p->trapframe->epc = p->sys_alarm_handler;
+      }
+    }
     yield();
+  }
 
   usertrapret();
 }

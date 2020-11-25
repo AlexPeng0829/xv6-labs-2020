@@ -103,4 +103,8 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  int ticks_elapse;            // ticks after calling sigalarm
+  int ticks_total;             // ticks before calling sys_alarm_handler
+  uint64 sys_alarm_handler;    // call back when ticks_elapse == ticks_total
+  struct trapframe *sigalarm_frame; // data page for restoring trapframe used by sigreturn
 };
