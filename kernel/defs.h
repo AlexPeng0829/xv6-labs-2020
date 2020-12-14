@@ -163,6 +163,7 @@ void            kvminithart(void);
 uint64          kvmpa(uint64);
 void            kvmmap(uint64, uint64, uint64, int);
 int             mappages(pagetable_t, uint64, uint64, uint64, int);
+void            kvm_mapkernel(pagetable_t, uint64, uint64, uint64, int);
 pagetable_t     uvmcreate(void);
 void            uvminit(pagetable_t, uchar *, uint);
 uint64          uvmalloc(pagetable_t, uint64, uint64);
@@ -178,6 +179,16 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
+void            vmprint(pagetable_t);
+int             copyin_new(pagetable_t, char *, uint64, uint64);
+int             copyinstr_new(pagetable_t, char *, uint64, uint64);
+void            kvm_switch(pagetable_t);
+void            kvm_switch_to_kernel();
+pagetable_t     kvm_create();
+int             kvm_free(pagetable_t);
+int             kvm_mapuser(pagetable_t, pagetable_t, uint64, uint64);
+int             kvm_unmapuser(pagetable_t, uint64 oldsz, uint64 newsz);
+pte_t*          walk(pagetable_t, uint64, int);
 
 // plic.c
 void            plicinit(void);

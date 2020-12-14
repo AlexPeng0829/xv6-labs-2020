@@ -121,6 +121,9 @@ found:
     return 0;
   }
 
+  // kernel pagetable per process
+  p->pagetable_kernel = kvm_create();
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -141,6 +144,9 @@ freeproc(struct proc *p)
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+  if(p->pagetable_kernel){
+    kvm_free(p->pagetable_kernel);
+  }
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -215,7 +221,7 @@ userinit(void)
 
   p = allocproc();
   initproc = p;
-  
+
   // allocate one user page and copy init's instructions
   // and data into it.
   uvminit(p->pagetable, initcode, sizeof(initcode));
@@ -229,7 +235,7 @@ userinit(void)
   p->cwd = namei("/");
 
   p->state = RUNNABLE;
-
+  kvm_mapuser(p->pagetable_kernel, p->pagetable, 0, p->sz);
   release(&p->lock);
 }
 
@@ -238,18 +244,24 @@ userinit(void)
 int
 growproc(int n)
 {
-  uint sz;
+  uint sz, sz_new;
   struct proc *p = myproc();
 
   sz = p->sz;
+  sz_new = sz;
   if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
+    if((sz_new = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
+    kvm_mapuser(p->pagetable_kernel, p->pagetable, sz, sz+n);
+
   } else if(n < 0){
-    sz = uvmdealloc(p->pagetable, sz, sz + n);
+    sz_new = uvmdealloc(p->pagetable, sz, sz + n);
+    kvm_unmapuser(p->pagetable_kernel, sz, sz + n);
+  }else{
+    return 0;
   }
-  p->sz = sz;
+  p->sz = sz_new;
   return 0;
 }
 
@@ -294,7 +306,7 @@ fork(void)
   pid = np->pid;
 
   np->state = RUNNABLE;
-
+  kvm_mapuser(np->pagetable_kernel, np->pagetable, 0, p->sz);
   release(&np->lock);
 
   return pid;
@@ -463,7 +475,7 @@ scheduler(void)
   for(;;){
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
-    
+
     int found = 0;
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
@@ -473,11 +485,13 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        kvm_switch(p->pagetable_kernel);
         swtch(&c->context, &p->context);
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
+        kvm_switch_to_kernel();
 
         found = 1;
       }
@@ -662,7 +676,7 @@ either_copyin(void *dst, int user_src, uint64 src, uint64 len)
 {
   struct proc *p = myproc();
   if(user_src){
-    return copyin(p->pagetable, dst, src, len);
+    return copyin_new(p->pagetable, dst, src, len);
   } else {
     memmove(dst, (char*)src, len);
     return 0;

@@ -15,6 +15,20 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+
+void
+kvm_switch(pagetable_t pagetable)
+{
+  w_satp(MAKE_SATP(pagetable));
+  sfence_vma();
+}
+
+void
+kvm_switch_to_kernel()
+{
+  kvm_switch(kernel_pagetable);
+}
+
 /*
  * create a direct-map page table for the kernel.
  */
@@ -45,6 +59,84 @@ kvminit()
   // map the trampoline for trap entry/exit to
   // the highest virtual address in the kernel.
   kvmmap(TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+}
+
+pagetable_t
+kvm_create()
+{
+  pagetable_t pagetable = uvmcreate();
+  if(pagetable == 0){
+    return 0;
+  }
+  for(int i = 1; i < 512; i++){
+    pagetable[i] = kernel_pagetable[i];
+  }
+    // uart registers
+  kvm_mapkernel(pagetable, UART0, UART0, PGSIZE, PTE_R | PTE_W);
+  // virtio mmio disk interface
+  kvm_mapkernel(pagetable, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+  // CLINT
+  kvm_mapkernel(pagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+  // PLIC
+  kvm_mapkernel(pagetable, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
+  return pagetable;
+}
+
+int
+kvm_unmapuser(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
+{
+  if(newsz >= oldsz)
+    return oldsz;
+
+  if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
+    int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
+    uvmunmap(pagetable, PGROUNDUP(newsz), npages, 0);
+  }
+  return newsz;
+}
+
+int
+kvm_mapuser(pagetable_t pagetable_kernel, pagetable_t pagetable_user, uint64 oldsz, uint64 newsz)
+{
+  if(newsz >= PLIC)
+    panic("process size too big");
+  uint64 a;
+  oldsz = PGROUNDUP(oldsz);
+  for(a = oldsz; a < newsz; a += PGSIZE){
+    pte_t* upte = walk(pagetable_user, a, 0);
+    if(upte == 0){
+      panic("kvm_mapuser: no user pte");
+    }
+    if((*upte & PTE_V) == 0){
+      panic("kvm_mapuser: user pte not valid");
+    }
+    // uint64 upte_flags = PTE_FLAGS(*upte);
+    // uint64 kpte_flags = upte_flags & ~(PTE_U|PTE_X|PTE_W);
+    pte_t* kpte = walk(pagetable_kernel, a ,1);
+    if(kpte == 0){
+      panic("kvm_mapuser: no kpte");
+    }
+    *kpte = *upte;
+    *kpte &= ~(PTE_U|PTE_W|PTE_X);
+    }
+  return newsz;
+}
+
+int
+kvm_free(pagetable_t pagetable)
+{
+  pte_t pte = pagetable[0];
+  pagetable_t level1 = (pagetable_t)PTE2PA(pte);
+  for(int i = 0; i < 512; ++i){
+    pte_t pte1 = level1[i];
+    if(pte1 & PTE_V){
+      kfree((void *)PTE2PA(pte1));
+      level1[i] = 0;
+    }
+  }
+  kfree((void *)pagetable);
+  kfree((void *)level1);
+  return 1;
 }
 
 // Switch h/w page table register to the kernel's page table,
@@ -119,6 +211,14 @@ kvmmap(uint64 va, uint64 pa, uint64 sz, int perm)
 {
   if(mappages(kernel_pagetable, va, sz, pa, perm) != 0)
     panic("kvmmap");
+}
+
+// add a mapping to the kernel page table per process.
+void
+kvm_mapkernel(pagetable_t pagetable, uint64 va, uint64 pa, uint64 sz, int perm)
+{
+  if(mappages(pagetable, va, sz, pa, perm) != 0)
+    panic("kvm_mapkernel");
 }
 
 // translate a kernel virtual address to
@@ -439,4 +539,36 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+void
+print_prefix(int level)
+{
+  printf("..");
+  for(int i = level; i > 0; i--){
+    printf(" ..");
+  }
+  return;
+}
+
+void vmprint_one_level(pagetable_t page_table, int level){
+  for(int i = 0; i < 512; ++i){
+    pte_t pte = page_table[i];
+    if(pte & PTE_V){
+      print_prefix(level);
+      printf("%d: pte %p pa %p\n", i, pte, PTE2PA(pte));
+      if(level < 2){
+        vmprint_one_level((pagetable_t)PTE2PA(pte), level+1);
+      }
+    }
+  }
+  return;
+}
+
+void
+vmprint(pagetable_t page_table)
+{
+  printf("page table %p\n", (uint64)page_table);
+  vmprint_one_level(page_table, 0);
+
 }

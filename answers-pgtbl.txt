@@ -1,0 +1,6 @@
+1) page 0 contains the code/data for init process.
+   page 2 is the user stack.
+   User process cannot read/write memory mapped by page 1.
+2) srcva + len < srva would check the overflow case when len is too big.
+   srcva=0x5000 len=0xffffffffffffffff 
+   srcva=0x5000 len=0xfffffffffffffffe
